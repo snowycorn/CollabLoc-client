@@ -770,29 +770,29 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
     ////
     // Draw object on observation pose
-    if (isFusedPoseReady) {
-      try {
-        Pose obsAbsClientPose = worldPoseToAbsClientPose(toAbsolutePose(observationPose, "colmap"), curClientPose);
-        Anchor obsAnchor = session.createAnchor(obsAbsClientPose);
-        // Get the current pose of an Anchor in world space. The Anchor pose is updated
-        // during calls to session.update() as ARCore refines its estimate of the world.
-        obsAnchor.getPose().toMatrix(modelMatrix, 0);
-
-        // Calculate model/view/projection matrices
-        Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0);
-        Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
-
-        // Update shader properties and draw
-        virtualObjectShader.setMat4("u_ModelView", modelViewMatrix);
-        virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix);
-
-        virtualObjectShader.setTexture("u_AlbedoTexture", virtualObjectAlbedoTexture);
-
-        render.draw(virtualObjectMesh, virtualObjectShader, virtualSceneFramebuffer);
-      } catch (FatalException e) {
-        e.printStackTrace();
-      }
-    }
+//    if (isFusedPoseReady) {
+//      try {
+//        Pose obsAbsClientPose = worldPoseToAbsClientPose(toAbsolutePose(observationPose, "colmap"), curClientPose);
+//        Anchor obsAnchor = session.createAnchor(obsAbsClientPose);
+//        // Get the current pose of an Anchor in world space. The Anchor pose is updated
+//        // during calls to session.update() as ARCore refines its estimate of the world.
+//        obsAnchor.getPose().toMatrix(modelMatrix, 0);
+//
+//        // Calculate model/view/projection matrices
+//        Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0);
+//        Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
+//
+//        // Update shader properties and draw
+//        virtualObjectShader.setMat4("u_ModelView", modelViewMatrix);
+//        virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix);
+//
+//        virtualObjectShader.setTexture("u_AlbedoTexture", virtualObjectAlbedoTexture);
+//
+//        render.draw(virtualObjectMesh, virtualObjectShader, virtualSceneFramebuffer);
+//      } catch (FatalException e) {
+//        e.printStackTrace();
+//      }
+//    }
     ////
 
     // Compose the virtual scene with the background.
