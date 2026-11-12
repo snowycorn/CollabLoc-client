@@ -89,6 +89,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
@@ -106,6 +107,15 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.util.Map;
+
+// NEW: UDP broadcast
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 ////
 
@@ -227,20 +237,24 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
   private volatile boolean acquireImageLock = false;
   String startTimeStr = getStartFormattedTimeString(LocalDateTime.now());
   private boolean recordLog = false;
+  private boolean sendingLog = false;
   private boolean successconnect = false;
 
   private boolean failconnect = false;
   private int failtimes = 0;
   private final List<Anchor> poseAnchors = new ArrayList<>();
   float curScale = 1f;
+  // NEW: send UDP broadcast
+  private DatagramSocket udpSocket;
+  private final ExecutorService udpExecutor= Executors.newSingleThreadExecutor();
   // DO NOT MODIFY ABOVE HERE
 
   //// Only modify below here
   // Settings
   private final String SERVER_ADDRESS = "140.113.195.250"; // amazon
-//  private final String SERVER_ADDRESS = "140.113.127.26";
+  //  private final String SERVER_ADDRESS = "140.113.127.26";
   private final int SERVER_PORT = 9999;
-//  private Pose observationPose = new Pose(
+  //  private Pose observationPose = new Pose(
 //          new float[]{-3.11849f, -1.09604f, 1.4994f},
 //          new float[]{-0.00149035f, 0.966581f, 0.190108f, -0.171983f}
 //  ); // library2_colmap
@@ -248,6 +262,9 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
           new float[]{1.9806462973019563f, 0.5887246734440216f, -1.2239148330493757f},
           new float[]{0.06267051364021912f, -0.7815291700995973f, -0.05715481243972835f, 0.6180761345240914f}
   ); // library3_colmap
+
+  // New: UDP broadcast
+  private final int UDP_PORT = 8888; // broadcast port device should listen to
   //// Only modify above here
 
   @Override
@@ -288,6 +305,14 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
     // Start the socketThread to connect to server
     new Thread(sendCurTrackConfThread).start();
+
+    // NEW: initialize udp broadcast
+    try {
+      udpSocket = new DatagramSocket();
+      udpSocket.setBroadcast(true);
+    } catch (IOException e) {
+      Log.e(TAG, "Could not initialize UDP socket", e);
+    }
     ////
   }
 
@@ -312,6 +337,12 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       // https://developers.google.com/ar/reference/java/arcore/reference/com/google/ar/core/Session#close()
       session.close();
       session = null;
+    }
+    // NEW: close UDP socket
+    udpExecutor.shutdown();
+    if (udpSocket != null) {
+      udpSocket.close();
+      udpSocket = null;
     }
 
     super.onDestroy();
@@ -633,6 +664,25 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
       } catch (DeadlineExceededException e) {
         System.out.println("DeadlineExceededException");
       }
+
+      // NEW: send UDP broadcast
+      // String format: {image index}|{current time}|{fused world pose}
+      // if (availServerResultCnt > 0) {
+      if (isFusedPoseReady) {
+        Pose absClientPose = toAbsolutePose(curClientPose, "arcore");
+        Pose fused_world_pose = absClientPoseToWorldPose(absClientPose);
+
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
+        String currentTimeString = sdf.format(new Date());
+
+        String currentIdxStamp = imageIdx + "-" + imageSubIdx;
+        try {
+          String payload = currentIdxStamp + "|" + currentTimeString + "|" + fused_world_pose;
+          sendUdpBroadcast(payload);
+        } catch (Exception e) {
+          e.printStackTrace();
+        }
+      }
     }
     ////
 
@@ -669,15 +719,17 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
 
     // Show a message
     String message = null;
-    if (recordLog && successconnect) {
-      message = "Recording logs";
-    }
-    else if (failconnect) {
-      message = "Connect Failed ! Retrying...";
-      // message = message + Integer.toString(failtimes);
+    if (failconnect) {
+      message = "Connect Failed! Retrying...";
     }
     else if (successconnect) {
-      message = "Connect Success !";
+      if (recordLog && isFusedPoseReady && sendingLog) {
+        message = "Recording & Broadcasting Pose"; // 明確告知同時在錄製與廣播
+      } else if (recordLog) {
+        message = "Recording logs (Waiting for Server Pose...)"; // 讓使用者知道還沒拿到初始定位
+      } else {
+        message = "Connect Success! Tap to record"; // 提示使用者點擊螢幕開始
+      }
     }
 
     if (message == null) {
@@ -804,6 +856,7 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     MotionEvent tap = tapHelper.poll();
     if (tap != null) {
       recordLog = !recordLog;
+      sendingLog = false;
     }
     /*
     MotionEvent tap = tapHelper.poll();
@@ -1099,6 +1152,25 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
     } catch (Exception e){
       e.printStackTrace();
     }
+  }
+
+  // NEW: Send UDP broadcast
+  private void sendUdpBroadcast(String message) {
+    udpExecutor.execute(() -> {
+      if(!recordLog)return;
+      try {
+        byte[] sendData = message.getBytes();
+        // 255.255.255.255 broadcast all channels
+        DatagramPacket sendPacket = new DatagramPacket(
+                sendData, sendData.length,
+                InetAddress.getByName("255.255.255.255"), UDP_PORT);
+        udpSocket.send(sendPacket);
+        sendingLog = true;
+      } catch (Exception e) {
+        e.printStackTrace();
+        sendingLog = false;
+      }
+    });
   }
 
   private Pose toAbsolutePose(Pose originPose, String originPoseType) {
